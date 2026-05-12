@@ -1,0 +1,25 @@
+# Test profile — used by integration tests with Testcontainers
+
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+  kafka:
+    bootstrap-servers: ${spring.embedded.kafka.brokers:localhost:9092}
+
+logging:
+  level:
+    com.yuno.payment: DEBUG
+    org.springframework.kafka: WARN
+    org.testcontainers: INFO
+
+payment:
+  outbox:
+    fixed-delay-ms: 500
+  reconciliation:
+    interval-ms: 60000
+  webhook:
+    retry-interval-ms: 5000

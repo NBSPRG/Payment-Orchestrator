@@ -1,0 +1,59 @@
+{
+  "info": {
+    "name": "Payment Orchestration",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080" },
+    { "key": "apiKey", "value": "test_api_key_123" },
+    { "key": "paymentId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Create Payment",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-API-Key", "value": "{{apiKey}}" },
+          { "key": "X-Idempotency-Key", "value": "postman-{{$timestamp}}" }
+        ],
+        "url": "{{baseUrl}}/api/v1/payments",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": { \"value\": 10000, \"currency\": \"INR\" },\n  \"paymentMethod\": {\n    \"type\": \"CARD\",\n    \"card\": {\n      \"number\": \"4111111111111111\",\n      \"expiryMonth\": \"12\",\n      \"expiryYear\": \"2027\",\n      \"cvv\": \"123\",\n      \"holderName\": \"Postman User\"\n    }\n  },\n  \"merchantReference\": \"POSTMAN-001\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Get Payment",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-API-Key", "value": "{{apiKey}}" }
+        ],
+        "url": "{{baseUrl}}/api/v1/payments/{{paymentId}}"
+      }
+    },
+    {
+      "name": "Get Payment Status",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-API-Key", "value": "{{apiKey}}" }
+        ],
+        "url": "{{baseUrl}}/api/v1/payments/{{paymentId}}/status"
+      }
+    },
+    {
+      "name": "List Payments",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-API-Key", "value": "{{apiKey}}" }
+        ],
+        "url": "{{baseUrl}}/api/v1/payments"
+      }
+    }
+  ]
+}

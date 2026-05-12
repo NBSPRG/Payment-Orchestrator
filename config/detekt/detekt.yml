@@ -1,0 +1,50 @@
+config:
+  validation: true
+  warningsAsErrors: false
+
+complexity:
+  LongMethod:
+    active: true
+    threshold: 90
+  LongParameterList:
+    active: false
+  TooManyFunctions:
+    active: true
+    thresholdInFiles: 25
+    thresholdInClasses: 25
+    thresholdInInterfaces: 25
+    thresholdInObjects: 25
+
+style:
+  MagicNumber:
+    active: false
+  MaxLineLength:
+    active: true
+    maxLineLength: 160
+    excludePackageStatements: true
+    excludeImportStatements: true
+  ReturnCount:
+    active: false
+  ThrowsCount:
+    active: true
+    max: 3
+  LoopWithTooManyJumpStatements:
+    active: false
+
+exceptions:
+  TooGenericExceptionCaught:
+    active: false
+  SwallowedException:
+    active: false
+
+performance:
+  SpreadOperator:
+    active: false
+
+empty-blocks:
+  EmptyClassBlock:
+    active: false
+
+potential-bugs:
+  UnsafeCast:
+    active: true
