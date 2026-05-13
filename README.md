@@ -28,43 +28,20 @@ PostgreSQL / Redis / Kafka
 
 ### Runtime Flow
 
-1. Merchant calls `POST /api/v1/payments` with `X-API-Key` and `X-Idempotency-Key`.
-2. Controller validates the request body, idempotency key, and authenticated merchant.
-3. Orchestration service checks the idempotency store.
-4. A payment is persisted in `INITIATED` state.
-5. The HTTP response returns quickly.
-6. A scheduled processor picks up initiated payments.
-7. Routing resolves the provider chain from database-backed routing rules.
-8. Retry coordinator calls Provider A or Provider B with Resilience4j retry/circuit breaker support.
-9. Final status is persisted, status history is stored, and an outbox event is written.
-10. Outbox processor publishes events to Kafka.
-11. Ledger, notification, webhook, and real-time publishers react to terminal events.
+Payment creation is synchronous up to validation, authentication, idempotency lookup, and persistence in `INITIATED` state. Background jobs then route the payment to a simulated provider, apply retry/failover rules, persist the terminal state, and publish side effects through the outbox.
+
+Kafka consumers handle ledger, notification, and webhook work. WebSocket and Redis publishers provide real-time status fan-out.
 
 ## Implemented Features
 
 - Spring Boot 3.3, Kotlin, Java 21
-- REST APIs for create, fetch, list, status, cancel, refund
-- API key authentication and rotation
-- Request validation for amount, currency, card, UPI, idempotency key, metadata, webhook URL, and request size
-- DB-backed idempotency with request-hash conflict detection
-- Redis-backed payment lock and rate limiting
-- Explicit payment state machine
-- Provider routing with primary and failover chains
-- Provider A and Provider B simulated connectors
-- Retry and failover coordinator with Resilience4j
-- PostgreSQL persistence with Flyway migrations
-- Payment attempt and status history tables
-- Outbox pattern with PostgreSQL row claiming
-- Kafka publisher and consumers
-- Ledger entries for capture and refund
-- Notification logging for capture, failure, and refund
-- Webhook delivery with HMAC-SHA256 signature, timeout, retry classification, and scheduled retry
-- WebSocket/STOMP status topic publisher
-- Redis pub/sub status fan-out support
-- Structured JSON logging
-- Micrometer metrics and actuator endpoints
-- OpenAPI/Swagger configuration
-- Unit tests and Testcontainers-backed integration tests
+- Payment APIs for create, fetch, list, status, cancel, and refund
+- API key authentication, rotation, rate limiting, and request validation
+- DB-backed idempotency, payment state machine, attempts, and status history
+- Provider routing with simulated Provider A/B connectors, Resilience4j retry, and failover
+- PostgreSQL/Flyway persistence, Redis locks/pub-sub, Kafka outbox publishing and consumers
+- Ledger, notification, webhook, and WebSocket status delivery
+- JSON logs, Micrometer/Actuator metrics, OpenAPI docs, unit tests, and Testcontainers integration tests
 
 ## Status Mapping
 
