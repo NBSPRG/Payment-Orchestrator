@@ -1,157 +1,137 @@
-# Payment Orchestration
+# Payment Orchestration System
 
-Modular monolith implementation of the payment orchestration plan in `plan.md`.
+Kotlin and Spring Boot implementation of a simplified payment orchestration system. The project is built as a modular monolith: one deployable application, one PostgreSQL database, and package-level boundaries for API, orchestration, routing, providers, persistence, idempotency, messaging, security, observability, and real-time status delivery.
 
-## Architecture Note
+The implementation intentionally uses in-process Kotlin interfaces between modules. Provider connectors are simulated adapters behind a common interface, which keeps the assignment focused on orchestration, reliability, persistence, and testability without adding unnecessary remote-service complexity.
 
-This project is intentionally built as a modular monolith:
+## Architecture
 
-- one Spring Boot deployable
-- one primary PostgreSQL database
-- package-level modules for API, orchestration, routing, provider adapters, persistence, security, idempotency, messaging, and real-time delivery
-- in-process Kotlin interfaces between modules
+```text
+Client
+  |
+  v
+Controller Layer
+  |
+  v
+PaymentOrchestrationService
+  |
+  +--> IdempotencyService
+  +--> PaymentStateMachine
+  +--> RoutingEngine
+  +--> RetryCoordinator
+  +--> ProviderConnectorRegistry
+  +--> OutboxPublisher
+  |
+  v
+PostgreSQL / Redis / Kafka
+```
 
-That means internal modules should not call each other through HTTP or gRPC. gRPC only becomes useful when a boundary is actually remote, for example when a real provider adapter or a future extracted service runs outside this application. Until then, in-process interfaces are simpler, faster, and easier to keep transactional.
+### Runtime Flow
 
-The current database approach is also deliberate: one PostgreSQL database, with clear table ownership by module. Multiple databases should be introduced only after splitting into independently deployed services, because separate databases would force distributed consistency before the system needs it.
+1. Merchant calls `POST /api/v1/payments` with `X-API-Key` and `X-Idempotency-Key`.
+2. Controller validates the request body, idempotency key, and authenticated merchant.
+3. Orchestration service checks the idempotency store.
+4. A payment is persisted in `INITIATED` state.
+5. The HTTP response returns quickly.
+6. A scheduled processor picks up initiated payments.
+7. Routing resolves the provider chain from database-backed routing rules.
+8. Retry coordinator calls Provider A or Provider B with Resilience4j retry/circuit breaker support.
+9. Final status is persisted, status history is stored, and an outbox event is written.
+10. Outbox processor publishes events to Kafka.
+11. Ledger, notification, webhook, and real-time publishers react to terminal events.
 
-## What Is Implemented
+## Implemented Features
 
-- Spring Boot 3 + Kotlin project skeleton
-- Docker Compose for PostgreSQL, Redis, Kafka, and Jaeger
-- Flyway schema for merchants, API keys, payments, attempts, status history, outbox, providers, and routing rules
-- Merchant API key authentication with Spring Security
+- Spring Boot 3.3, Kotlin, Java 21
+- REST APIs for create, fetch, list, status, cancel, refund
+- API key authentication and rotation
+- Request validation for amount, currency, card, UPI, idempotency key, metadata, webhook URL, and request size
+- DB-backed idempotency with request-hash conflict detection
+- Redis-backed payment lock and rate limiting
 - Explicit payment state machine
-- Provider routing and simulated provider connectors
-- Idempotency result store
-- Payment create/get REST API
-- Async provider processing after payment creation
-- Outbox row generation and scheduled Kafka publisher with PostgreSQL row claiming
-- Webhook delivery with HTTP timeouts, retry classification, and HMAC signatures
-- API key rotation endpoint
-- WebSocket/STOMP status updates for clients
-- Redis pub/sub status push as a best-effort cluster fan-out side effect
-- Focused unit tests for state transitions, request validation, and routing
+- Provider routing with primary and failover chains
+- Provider A and Provider B simulated connectors
+- Retry and failover coordinator with Resilience4j
+- PostgreSQL persistence with Flyway migrations
+- Payment attempt and status history tables
+- Outbox pattern with PostgreSQL row claiming
+- Kafka publisher and consumers
+- Ledger entries for capture and refund
+- Notification logging for capture, failure, and refund
+- Webhook delivery with HMAC-SHA256 signature, timeout, retry classification, and scheduled retry
+- WebSocket/STOMP status topic publisher
+- Redis pub/sub status fan-out support
+- Structured JSON logging
+- Micrometer metrics and actuator endpoints
+- OpenAPI/Swagger configuration
+- Unit tests and Testcontainers-backed integration tests
 
-## Still Future Work
+## Status Mapping
 
-- Testcontainers integration tests for PostgreSQL, Redis, and Kafka
-- Production-grade WebSocket authorization for merchant-specific subscriptions
-- Bulkheads around real provider calls
-- Durable background command queue for provider processing
-- More concurrency/idempotency integration tests
-- Optional IP allowlisting for merchant API keys
+The assignment uses generic status names. This implementation uses payment-domain names:
 
-## Local Run
+| Assignment | Implementation |
+|---|---|
+| CREATED | INITIATED |
+| PROCESSING | PROCESSING |
+| SUCCESS | CAPTURED |
+| FAILED | FAILED |
+| RETRYING | Retry attempts are stored in `payment_attempts`; retryable provider errors drive failover |
 
-Prerequisites:
+Additional implemented terminal states:
 
-- Java 21
-- Docker Desktop
+- `CANCELLED`
+- `REFUNDED`
 
-```powershell
-docker compose up -d
-.\gradlew.bat bootRun
+## API Summary
+
+Base URL:
+
+```text
+http://localhost:8080
 ```
 
-Creating a payment returns the initial `INITIATED` state quickly. Provider processing happens asynchronously in the background; use the status endpoint, list endpoint, WebSocket topic, or webhook events to observe the final state.
+Endpoints:
 
-## Troubleshooting
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/v1/payments` | Create a payment |
+| `GET` | `/api/v1/payments/{id}` | Fetch payment details |
+| `GET` | `/api/v1/payments/{id}/status` | Fetch current payment status |
+| `GET` | `/api/v1/payments` | List merchant payments |
+| `POST` | `/api/v1/payments/{id}/cancel` | Cancel a payment |
+| `POST` | `/api/v1/payments/{id}/refund` | Refund a captured payment |
+| `POST` | `/api/v1/merchant/api-keys/rotate` | Rotate merchant API key |
+| `GET` | `/actuator/health` | Health check |
+| `GET` | `/swagger-ui/index.html` | Swagger UI |
 
-Check Java:
+Required headers for payment APIs:
 
-```powershell
-java -version
+```text
+X-API-Key: test_api_key_123
+X-Idempotency-Key: unique-key-per-create-request
 ```
 
-Expected version is Java 21.
-
-Check Docker services:
-
-```powershell
-docker compose ps
-```
-
-If full tests fail with Testcontainers errors, start Docker Desktop and rerun:
-
-```powershell
-.\gradlew.bat test
-```
-
-## Run Tests
-
-Fast non-Docker checks:
-
-```powershell
-.\gradlew.bat compileKotlin compileTestKotlin
-```
-
-Fast unit/smoke suite with JaCoCo coverage:
-
-```powershell
-.\gradlew.bat test jacocoTestCoverageVerification
-```
-
-Docker-backed integration suite:
-
-```powershell
-.\gradlew.bat integrationTest
-```
-
-The coverage gate is set to 75% for the fast suite. Integration tests require Docker Desktop because they use Testcontainers for PostgreSQL, Redis, and Kafka.
-
-## CI/CD Checks
-
-GitHub Actions runs on every push and pull request:
-
-- Compile Kotlin main and test sources
-- Run Detekt static analysis
-- Run fast unit/smoke tests
-- Enforce JaCoCo 75% coverage
-- Verify Docker is available
-- Validate `docker-compose.yml`
-- Start Docker Compose services
-- Run Docker/Testcontainers-backed integration tests
-
-Local equivalent:
-
-```powershell
-.\gradlew.bat compileKotlin compileTestKotlin detekt test jacocoTestCoverageVerification
-.\gradlew.bat integrationTest
-```
-
-## API Notes
-
-- `X-Idempotency-Key` must be 8 to 128 characters and may contain letters, numbers, `.`, `_`, `:`, and `-`.
-- Payment create returns `INITIATED`; provider result is applied asynchronously.
-- Webhook URLs must be HTTPS.
-- Card expiry must not be in the past.
-- Metadata is limited to 50 top-level entries.
-- Request bodies are limited to 1 MiB by default.
-- Supported currencies are `INR`, `USD`, `EUR`, and `GBP`.
-
-## More Docs
-
-- [Architecture decisions](docs/05-architecture-decisions.md)
-- [Local smoke tests](docs/06-local-smoke-tests.md)
-- [Postman collection](docs/payment-orchestration.postman_collection.json)
+`X-Idempotency-Key` must be 8 to 128 characters and may contain letters, numbers, `.`, `_`, `:`, and `-`.
 
 ## Demo Credentials
 
-Seeded merchant:
+The local/demo seed migration creates one merchant API key:
 
 ```text
 merchantId: merchant_demo
 apiKey: test_api_key_123
 ```
 
-## Create Payment
+This credential is for local/demo use only.
+
+## Create Payment Example
 
 ```powershell
-curl -X POST http://localhost:8080/api/v1/payments `
+curl.exe -X POST http://localhost:8080/api/v1/payments `
   -H "Content-Type: application/json" `
   -H "X-API-Key: test_api_key_123" `
-  -H "X-Idempotency-Key: 11111111-1111-1111-1111-111111111111" `
+  -H "X-Idempotency-Key: demo-11111111" `
   -d '{
     "amount": { "value": 10000, "currency": "INR" },
     "paymentMethod": {
@@ -170,16 +150,132 @@ curl -X POST http://localhost:8080/api/v1/payments `
   }'
 ```
 
-## Payment Status WebSocket
+The initial response returns `INITIATED`. Background processing then moves the payment to `CAPTURED` or `FAILED`.
 
-Connect a STOMP client to:
+Check status:
+
+```powershell
+curl.exe -H "X-API-Key: test_api_key_123" `
+  http://localhost:8080/api/v1/payments/{paymentId}/status
+```
+
+## Local Run
+
+Prerequisites:
+
+- Java 21
+- Docker Desktop or Docker Engine
+
+Start dependencies:
+
+```powershell
+docker compose up -d
+```
+
+Run the app:
+
+```powershell
+.\gradlew.bat bootRun
+```
+
+Health check:
+
+```powershell
+curl.exe http://localhost:8080/actuator/health
+```
+
+## Running With Containers On A Remote VM
+
+If PostgreSQL, Redis, Kafka, and Jaeger are running on an Azure VM, keep an SSH tunnel open from the local machine:
+
+```powershell
+ssh -i "C:\path\to\key.pem" `
+  -L 5432:localhost:5432 `
+  -L 6379:localhost:6379 `
+  -L 9092:localhost:9092 `
+  -L 4318:localhost:4318 `
+  -L 16686:localhost:16686 `
+  user@vm-public-ip
+```
+
+Then run the Spring Boot app locally with the default `localhost` configuration.
+
+## Tests
+
+Fast checks:
+
+```powershell
+.\gradlew.bat compileKotlin compileTestKotlin detekt test jacocoTestCoverageVerification
+```
+
+Integration tests:
+
+```powershell
+.\gradlew.bat integrationTest
+```
+
+Integration tests use Testcontainers and require access to a Docker daemon. If Docker is only available on an Azure VM, run the integration tests on that VM.
+
+Current integration coverage includes:
+
+- application health
+- create payment
+- async processing to `CAPTURED`
+- Provider A routing for card payments
+- idempotent replay
+- idempotency conflict
+- missing API key
+- list payments
+- not found response
+- invalid idempotency key
+- unsupported currency
+- non-HTTPS webhook URL
+- API key rotation
+
+## Observability
+
+- Health: `/actuator/health`
+- Metrics: Micrometer and Prometheus registry
+- Tracing: OpenTelemetry exporter configuration
+- Logs: structured JSON through Logback
+- Local tracing dependency: Jaeger in `docker-compose.yml`
+
+## WebSocket Status Updates
+
+Endpoint:
 
 ```text
 ws://localhost:8080/ws/payments
 ```
 
-Subscribe to the payment-specific topic:
+Subscribe to:
 
 ```text
 /topic/payments/{merchantId}/{paymentId}
 ```
+
+## Webhooks
+
+Payment requests may include an HTTPS `webhookUrl`. Terminal payment events trigger a webhook delivery with:
+
+```text
+X-Yuno-Signature
+X-Yuno-Timestamp
+X-Yuno-Event-Type
+```
+
+Webhook delivery uses HMAC-SHA256 signing and retry scheduling for retryable failures.
+
+## Submission Notes
+
+- The system is a modular monolith, not a microservice deployment.
+- Provider connectors are simulated in-process implementations behind an interface.
+- PostgreSQL is the durable idempotency source. Redis is used for locks, rate limiting, and real-time fan-out support.
+- Kafka is used for side effects through the outbox pattern.
+- The local seeded merchant and API key are intended only for development and demo runs.
+
+## Additional Files
+
+- [plan.md](plan.md): current architecture and implementation plan
+- [AI_PROMPTS.md](AI_PROMPTS.md): prompt history and evolution notes
+- [Postman collection](docs/payment-orchestration.postman_collection.json): quick API collection

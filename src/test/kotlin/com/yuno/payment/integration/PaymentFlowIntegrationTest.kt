@@ -1,10 +1,12 @@
 package com.yuno.payment.integration
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.MvcResult
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
 
@@ -16,6 +18,9 @@ class PaymentFlowIntegrationTest : AbstractIntegrationTest() {
 
     @Autowired
     private lateinit var mockMvc: MockMvc
+
+    @Autowired
+    private lateinit var objectMapper: ObjectMapper
 
     private val apiKey = "test_api_key_123"
 
@@ -46,6 +51,31 @@ class PaymentFlowIntegrationTest : AbstractIntegrationTest() {
             status { isCreated() }
             jsonPath("$.status") { value("INITIATED") }
             jsonPath("$.merchantId") { value("merchant_demo") }
+        }
+    }
+
+    @Test
+    fun `create payment - async processing captures card payment with provider A`() {
+        val createResult = mockMvc.post("/api/v1/payments") {
+            header("X-API-Key", apiKey)
+            header("X-Idempotency-Key", "test-async-card-${System.nanoTime()}")
+            contentType = MediaType.APPLICATION_JSON
+            content = createCardPaymentJson("ORDER-ASYNC-CARD-${System.nanoTime()}")
+        }.andExpect {
+            status { isCreated() }
+            jsonPath("$.status") { value("INITIATED") }
+        }.andReturn()
+
+        val paymentId = objectMapper.readTree(createResult.response.contentAsString).get("id").asText()
+        waitUntilCaptured(paymentId)
+
+        mockMvc.get("/api/v1/payments/$paymentId") {
+            header("X-API-Key", apiKey)
+        }.andExpect {
+            status { isOk() }
+            jsonPath("$.status") { value("CAPTURED") }
+            jsonPath("$.providerName") { value("PROVIDER_A") }
+            jsonPath("$.providerTransactionId") { exists() }
         }
     }
 
@@ -144,4 +174,32 @@ class PaymentFlowIntegrationTest : AbstractIntegrationTest() {
           "merchantReference": "$merchantRef"
         }
     """.trimIndent()
+
+    private fun waitUntilCaptured(paymentId: String): MvcResult {
+        val deadline = System.currentTimeMillis() + ASYNC_PROCESSING_TIMEOUT_MS
+        var lastResult: MvcResult? = null
+
+        while (System.currentTimeMillis() < deadline) {
+            val result = mockMvc.get("/api/v1/payments/$paymentId/status") {
+                header("X-API-Key", apiKey)
+            }.andExpect {
+                status { isOk() }
+            }.andReturn()
+
+            lastResult = result
+            val status = objectMapper.readTree(result.response.contentAsString).get("status").asText()
+            if (status == "CAPTURED") {
+                return result
+            }
+            Thread.sleep(ASYNC_PROCESSING_POLL_MS)
+        }
+
+        val lastBody = lastResult?.response?.contentAsString ?: "<no status response>"
+        throw AssertionError("Payment $paymentId was not CAPTURED within timeout. Last response: $lastBody")
+    }
+
+    companion object {
+        private const val ASYNC_PROCESSING_TIMEOUT_MS = 10_000L
+        private const val ASYNC_PROCESSING_POLL_MS = 250L
+    }
 }

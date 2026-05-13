@@ -16,4 +16,4 @@ VALUES (
     'ACTIVE',
     'STANDARD'
 )
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (key_prefix) DO NOTHING;
