@@ -1,6 +1,7 @@
 package com.yuno.payment.idempotency
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.kotlin.readValue
 import com.yuno.payment.api.v1.dto.PaymentResponse
 import com.yuno.payment.domain.exception.IdempotencyConflictException
 import com.yuno.payment.persistence.entity.IdempotencyKeyEntity
@@ -21,7 +22,7 @@ class IdempotencyService(
         if (existing.requestHash != hashRequest(request)) {
             throw IdempotencyConflictException()
         }
-        return objectMapper.convertValue(existing.responseBody, PaymentResponse::class.java)
+        return objectMapper.readValue(objectMapper.writeValueAsString(existing.responseBody))
     }
 
     fun storeResult(
@@ -45,7 +46,7 @@ class IdempotencyService(
                     idempotencyKey = idempotencyKey,
                     requestHash = requestHash,
                     responseStatus = 201,
-                    responseBody = objectMapper.convertValue(response, Map::class.java) as Map<String, Any?>,
+                    responseBody = objectMapper.readValue(objectMapper.writeValueAsString(response)),
                     paymentId = response.id,
                     expiresAt = Instant.now().plus(24, ChronoUnit.HOURS),
                 ),
