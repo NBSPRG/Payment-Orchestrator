@@ -1,6 +1,7 @@
 package com.yuno.payment.idempotency
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.kotlin.convertValue
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.yuno.payment.api.v1.dto.PaymentResponse
 import com.yuno.payment.domain.exception.IdempotencyConflictException
@@ -22,7 +23,10 @@ class IdempotencyService(
         if (existing.requestHash != hashRequest(request)) {
             throw IdempotencyConflictException()
         }
-        return objectMapper.readValue(objectMapper.writeValueAsString(existing.responseBody))
+        (existing.responseBody[RAW_RESPONSE_BODY_KEY] as? String)?.let {
+            return objectMapper.readValue<PaymentResponse>(it)
+        }
+        return objectMapper.convertValue<PaymentResponse>(existing.responseBody)
     }
 
     fun storeResult(
@@ -46,7 +50,7 @@ class IdempotencyService(
                     idempotencyKey = idempotencyKey,
                     requestHash = requestHash,
                     responseStatus = 201,
-                    responseBody = objectMapper.readValue(objectMapper.writeValueAsString(response)),
+                    responseBody = mapOf(RAW_RESPONSE_BODY_KEY to objectMapper.writeValueAsString(response)),
                     paymentId = response.id,
                     expiresAt = Instant.now().plus(24, ChronoUnit.HOURS),
                 ),
@@ -66,5 +70,9 @@ class IdempotencyService(
         val canonical = objectMapper.writeValueAsBytes(request)
         val digest = MessageDigest.getInstance("SHA-256").digest(canonical)
         return digest.joinToString("") { "%02x".format(it) }
+    }
+
+    private companion object {
+        private const val RAW_RESPONSE_BODY_KEY = "rawResponseBody"
     }
 }

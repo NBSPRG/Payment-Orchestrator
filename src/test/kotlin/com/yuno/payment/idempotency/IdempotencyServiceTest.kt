@@ -49,6 +49,21 @@ class IdempotencyServiceTest {
     }
 
     @Test
+    fun `returns cached response from stored response body`() {
+        whenever(repository.findByMerchantIdAndIdempotencyKey("merchant", "key")).thenReturn(null)
+        whenever(repository.save(any<IdempotencyKeyEntity>())).thenAnswer { it.arguments[0] }
+        service.storeResult("merchant", "key", mapOf("amount" to 100), response())
+        val saved = org.mockito.kotlin.argumentCaptor<IdempotencyKeyEntity>()
+        verify(repository).save(saved.capture())
+        whenever(repository.findByMerchantIdAndIdempotencyKey("merchant", "key")).thenReturn(saved.firstValue)
+
+        val cached = service.getCachedResponse("merchant", "key", mapOf("amount" to 100))
+
+        assertThat(cached?.amount?.currency).isEqualTo("INR")
+        assertThat(cached?.providerName).isNull()
+    }
+
+    @Test
     fun `throws conflict when same key has different request hash`() {
         service.storeResult("merchant", "key", mapOf("amount" to 100), response())
         val saved = org.mockito.kotlin.argumentCaptor<IdempotencyKeyEntity>()

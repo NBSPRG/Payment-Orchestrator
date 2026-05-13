@@ -28,7 +28,7 @@ abstract class AbstractIntegrationTest {
         val redis: GenericContainer<*> = GenericContainer(DockerImageName.parse("redis:7-alpine"))
             .withExposedPorts(6379)
 
-        val kafka: KafkaContainer = KafkaContainer(DockerImageName.parse("apache/kafka:3.7.1"))
+        val kafka: KafkaContainer = KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.6.0"))
 
         init {
             postgres.start()
